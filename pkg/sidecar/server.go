@@ -171,9 +171,14 @@ func transportWithTimeout(connectTimeout time.Duration) http.RoundTripper {
 
 // requestABackup connects to specified host and endpoint and gets the backup
 func requestABackup(cfg *Config, host, endpoint string) (*http.Response, error) {
+	retries := 3
+	var req *http.Request
+	var resp *http.Response
+	var err error
+
 	log.Info("initialize a backup", "host", host, "endpoint", endpoint)
 
-	req, err := http.NewRequest("GET", prepareURL(host, endpoint), nil)
+	req, err = http.NewRequest("GET", prepareURL(host, endpoint), nil)
 	if err != nil {
 		return nil, fmt.Errorf("fail to create request: %s", err)
 	}
@@ -184,13 +189,23 @@ func requestABackup(cfg *Config, host, endpoint string) (*http.Response, error) 
 	client := &http.Client{}
 	client.Transport = transportWithTimeout(serverConnectTimeout)
 
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		status := "unknown"
-		if resp != nil {
-			status = resp.Status
+	for retries > 0 {
+		resp, err = client.Do(req)
+		if err != nil {
+			retries -= 1
+			if retries == 0 {
+				return nil, fmt.Errorf("fail to get backup: %s", err)
+			} else {
+				fmt.Errorf("fail to get backup: %s, retrying backup, remaining %d.", err, retries)
+			}
+		} else if resp.StatusCode != 200 {
+			retries -= 1
+			if retries == 0 {
+				return nil, fmt.Errorf("fail to get backup, code: %s", resp.Status)
+			} else {
+				fmt.Errorf("fail to get backup, code: %s, retrying backup, remaining %d", resp.Status, retries)
+			}
 		}
-		return nil, fmt.Errorf("fail to get backup: %s, code: %s", err, status)
 	}
 
 	return resp, nil
